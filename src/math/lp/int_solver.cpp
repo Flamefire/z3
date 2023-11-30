@@ -647,7 +647,7 @@ namespace lp {
         unsigned nsqr = n*n;
         unsigned nsqr_rand = random() % nsqr;
         double x = std::sqrt(nsqr_rand);
-        unsigned x_int = std::floor(x);
+        unsigned x_int = static_cast<unsigned>(std::floor(x));
         SASSERT(0 <= x_int && x_int < n);
         unsigned k = (n - 1) - x_int;
         SASSERT(0 <= x_int && x_int < n);
