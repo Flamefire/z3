@@ -21,6 +21,10 @@ namespace lp {
         m_settings.updt_params(_p);
     }
 
+    impq lar_solver::column_span(lpvar j) const {       
+        return get_upper_bound(j) - get_lower_bound(j);
+    }
+
     lar_solver::lar_solver() :
         m_mpq_lar_core_solver(m_settings, *this),
         m_var_register(false),

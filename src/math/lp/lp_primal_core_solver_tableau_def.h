@@ -181,6 +181,7 @@ template <typename T, typename X>void lp_primal_core_solver<T, X>::advance_on_en
         return;
 
     if (this->m_settings.simplex_strategy() != simplex_strategy_enum::tableau_rows) {
+        // todo: this statement seems to be misplaced, it needs to be before the return above
         std::list<unsigned>::iterator it = m_non_basis_list.end();
         it--;
         * it = static_cast<unsigned>(leaving);

@@ -425,13 +425,48 @@ bool gomory::is_gomory_cut_target(const row_strip<mpq>& row) {
     return true;
 }
 
-int gomory::find_basic_var() {
+int gomory::find_beneficial_basic_var() {
     unsigned n = 0;
     int result = -1;
     unsigned min_row_size = UINT_MAX;
+    std::function<bool(lpvar)> can_be_used_for_cut= [&](lpvar j) {
+        TRACE("gomory_cut", tout << "try j" << j << "\n");
+        if (!lia.is_base(j))
+            return false;
 
+        if (!lia.column_is_int_inf(j))
+            return false;
+
+        const row_strip<mpq>& row = lra.get_row(lia.row_of_basic_column(j));
+        if (!is_gomory_cut_target(row)) 
+            return false;
+        return true;
+    };
+
+    std::function<bool(lpvar, lpvar)> compare = [&](lpvar j, lpvar k) {
+        bool j_boxed = lia.is_boxed(j);
+        bool k_boxed = lia.is_boxed(k);
+        if (j_boxed && !k_boxed) return true;
+        if (!j_boxed && k_boxed) return false;
+        if (!j_boxed && !k_boxed) return j < k;
+        SASSERT(j_boxed && k_boxed);
+        auto j_score = lra.column_span(j).x - 2*rational(lra.usage_in_terms(j));
+        auto k_score = lra.column_span(k).x - 2*rational(lra.usage_in_terms(k));
+        if (j_score < k_score) {
+            return true;
+        }
+        if (j_score > k_score)
+            return false;
+        auto j_min_k = abs(lra.get_column_value(j).x) - abs(lra.get_column_value(k).x);
+        if (j_min_k < 0) return true;
+        if (j_min_k > 0) return false;
+        int usage_j_k = lra.usage_in_terms(j) - lra.usage_in_terms(k);
+        if (usage_j_k > 0) return true;
+        if (usage_j_k < 0) return false;
+        return j < k;
+    };
 #if 1
-    result = lia.select_int_infeasible_var(true);
+    result = lia.select_var_for_gomory_cut(can_be_used_for_cut, compare);
 
     if (result == -1)
         return result;
@@ -466,7 +501,7 @@ int gomory::find_basic_var() {
 }
     
 lia_move gomory::operator()() {
-    int j = find_basic_var();
+    int j = find_beneficial_basic_var();
     if (j == -1)
         return lia_move::undef;
     unsigned r = lia.row_of_basic_column(j);
@@ -474,7 +509,6 @@ lia_move gomory::operator()() {
     SASSERT(lra.row_is_correct(r));
     SASSERT(is_gomory_cut_target(row));
     lia.m_upper = false;
-    lia.m_cut_vars.push_back(j);
     return cut(lia.m_t, lia.m_k, lia.m_ex, j, row);
 }
 

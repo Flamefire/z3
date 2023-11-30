@@ -180,7 +180,6 @@ namespace lp {
         m_ex = e;
         m_ex->clear();
         m_upper = false;
-        m_cut_vars.reset();
         
         lia_move r = lia_move::undef;
 
@@ -199,14 +198,11 @@ namespace lp {
         if (r == lia_move::undef && should_hnf_cut()) r = hnf_cut();
 
         std::function<lia_move(void)> gomory_fn = [&]() { return gomory(*this)(); };
-        m_cut_vars.reset();
 #if 0
         if (r == lia_move::undef && should_gomory_cut()) r = gomory(*this)();
 #else
         if (r == lia_move::undef && should_gomory_cut()) r = local_cut(2, gomory_fn);
-        
 #endif
-        m_cut_vars.reset();
         if (r == lia_move::undef) r = int_branch(*this)();
         if (settings().get_cancel_flag()) r = lia_move::undef;        
         return r;
@@ -634,7 +630,63 @@ namespace lp {
         return true;
     }
 
+    lpvar int_solver::select_var_for_gomory_cut(std::function<bool(lpvar)> can_be_used_for_cut, std::function<bool(lpvar, lpvar)> compare) {
+        SASSERT(m_gomory_cut_candidates_sort_count >= 0 && m_gomory_cut_candidates_sort_count <= m_gomory_cut_candidates_sort_threshold);
+        if (m_gomory_cut_candidates_sort_count == m_gomory_cut_candidates_sort_threshold) {
+            m_gomory_cut_candidates_sort_count = 0;
+            sort_gomory_cut_candidates(compare);
+        } else {
+            m_gomory_cut_candidates_sort_count++;
+        }
 
+        return pick_gomory_cut_var(can_be_used_for_cut);
+    }
+
+    lpvar int_solver::pick_gomory_cut_var(std::function<bool(lpvar)> can_be_used_for_cut) {
+        unsigned n = lra.column_count();
+        unsigned nsqr = n*n;
+        unsigned nsqr_rand = random() % nsqr;
+        double x = std::sqrt(nsqr_rand);
+        unsigned x_int = std::floor(x);
+        SASSERT(0 <= x_int && x_int < n);
+        unsigned k = (n - 1) - x_int;
+        SASSERT(0 <= x_int && x_int < n);
+        if (can_be_used_for_cut(k)) {
+            return k;
+        }    
+        // find j in the neighbourdood of k
+        
+        unsigned j_low = k, j_high = k;
+        while (true) {
+            if (j_low > 0) {
+                j_low --;
+                if (can_be_used_for_cut(j_low)) {
+                    return j_low;
+                }
+            }
+            if (j_high < n - 1) {
+                j_high ++;
+                if (can_be_used_for_cut(j_high))
+                    return j_high;
+            }
+            if (j_low == 0 && j_high == n - 1)
+                return -1;
+        }
+        return -1;
+    }
+
+    void int_solver::sort_gomory_cut_candidates(std::function<bool(lpvar, lpvar)> compare) {
+        std::vector<lpvar> t;
+        for (lpvar j = 0; j < this->lra.number_of_vars(); j++) t.push_back(j);
+        std::sort(t.begin(), t.end(), compare);
+        this->m_gomory_cut_candidates_sorted_list.clear();
+        for (lpvar j: t) {
+            this->m_gomory_cut_candidates_sorted_list.push_back(j);
+        }
+    }
+
+    
+    
     int int_solver::select_int_infeasible_var(bool check_bounded) {
         int r_small_box = -1;
         int r_small_value = -1;
@@ -648,10 +700,10 @@ namespace lp {
         lar_core_solver & lcs = lra.m_mpq_lar_core_solver;
         unsigned prev_usage = 0;
 
-        auto check_bounded_fn = [&](unsigned j) {
+        auto check_bounded_fn = [&](unsigned j_to_check) {
             if (!check_bounded)
                 return true;
-            auto const& row = lra.get_row(row_of_basic_column(j));
+            auto const& row = lra.get_row(row_of_basic_column(j_to_check));
             for (const auto & p : row) {
                 unsigned j = p.var();
                 if (!is_base(j) && (!at_bound(j) || !is_zero(get_value(j).y)))
@@ -672,13 +724,12 @@ namespace lp {
                 continue;
             if (!check_bounded_fn(j))
                 continue;
-            if (m_cut_vars.contains(j))
-                continue;
-
+         
             SASSERT(!is_fixed(j));
 
             unsigned usage = lra.usage_in_terms(j);
-            if (is_boxed(j) && (new_range = lcs.m_r_upper_bounds()[j].x - lcs.m_r_lower_bounds()[j].x - rational(2*usage)) <= small_value) {
+            if (is_boxed(j) &&
+                (new_range = lcs.m_r_upper_bounds()[j].x - lcs.m_r_lower_bounds()[j].x - rational(2*usage)) <= small_value) {
 
                 bool improved = new_range <= range || r_small_box == -1;
                 if (improved)
@@ -866,7 +917,6 @@ namespace lp {
             if (settings().get_cancel_flag())
                 return lia_move::undef;
         }
-        m_cut_vars.reset();
 
         auto is_small_cut = [&](ex const& cut) {
             return all_of(cut.m_term, [&](auto ci) { return ci.coeff().is_small(); });

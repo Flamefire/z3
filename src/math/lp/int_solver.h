@@ -27,7 +27,7 @@ Revision History:
 #include "math/lp/int_gcd_test.h"
 #include "math/lp/lia_move.h"
 #include "math/lp/explanation.h"
-
+#include <list>
 namespace lp {
 class lar_solver;
 class lar_core_solver;
@@ -63,13 +63,14 @@ class int_solver {
     unsigned            m_number_of_calls;
     lar_term            m_t;               // the term to return in the cut
     mpq                 m_k;               // the right side of the cut
-    bool                m_upper;           // cut is an upper bound
+    bool                m_upper;           // the cut is an upper bound
     explanation         *m_ex;             // the conflict explanation
     hnf_cutter          m_hnf_cutter;
     unsigned            m_hnf_cut_period;
-    unsigned_vector     m_cut_vars;        // variables that should not be selected for cuts
-    
-    vector<equality>       m_equalities;
+    std::list<lpvar>    m_gomory_cut_candidates_sorted_list;
+    unsigned            m_gomory_cut_candidates_sort_count = 20; // to init the sorting
+    unsigned            m_gomory_cut_candidates_sort_threshold = 20;
+    vector<equality>    m_equalities;
 public:
     int_solver(lar_solver& lp);
     
@@ -91,7 +92,8 @@ public:
     vector<equality> const& equalities() const { return m_equalities; }
 
 private:
-    // lia_move patch_nbasic_columns();
+    lpvar pick_gomory_cut_var(std::function<bool(lpvar)>);
+    void sort_gomory_cut_candidates(std::function<bool(lpvar, lpvar)> compare);
     bool get_freedom_interval_for_column(unsigned j, bool & inf_l, impq & l, bool & inf_u, impq & u, mpq & m);
     bool is_boxed(unsigned j) const;
     bool is_fixed(unsigned j) const;
@@ -133,6 +135,6 @@ public:
     lia_move hnf_cut();
 
     int select_int_infeasible_var(bool check_bounded);
-
+    lpvar select_var_for_gomory_cut(std::function<bool(lpvar)> can_be_used_for_cut, std::function<bool(lpvar, lpvar)>);
 };
 }
