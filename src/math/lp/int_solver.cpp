@@ -632,7 +632,7 @@ namespace lp {
 
     lpvar int_solver::select_var_for_gomory_cut(std::function<bool(lpvar)> can_be_used_for_cut, std::function<bool(lpvar, lpvar)> compare) {
         SASSERT(m_gomory_cut_candidates_sort_count >= 0 && m_gomory_cut_candidates_sort_count <= m_gomory_cut_candidates_sort_threshold);
-        if (m_gomory_cut_candidates_sort_count == m_gomory_cut_candidates_sort_threshold) {
+        if (m_gomory_cut_candidates_sort_count == m_gomory_cut_candidates_sort_threshold || m_gomory_cut_candidates_sorted_list.size() < lra.column_count()) {
             m_gomory_cut_candidates_sort_count = 0;
             sort_gomory_cut_candidates(compare);
         } else {
@@ -644,34 +644,30 @@ namespace lp {
 
     lpvar int_solver::pick_gomory_cut_var(std::function<bool(lpvar)> can_be_used_for_cut) {
         unsigned n = lra.column_count();
-        unsigned nsqr = n*n;
-        unsigned nsqr_rand = random() % nsqr;
-        double x = std::sqrt(nsqr_rand);
-        unsigned x_int = static_cast<unsigned>(std::floor(x));
-        SASSERT(0 <= x_int && x_int < n);
-        unsigned k = (n - 1) - x_int;
-        SASSERT(0 <= x_int && x_int < n);
-        if (can_be_used_for_cut(k)) {
-            return k;
-        }    
+        unsigned n_rand = random() % n;
+        double n_rat = static_cast<double>(n_rand) / static_cast<double>(n);
+        SASSERT(0 <= n_rat && n_rat < 1);
+        // diminish n_rat by setting it to square of itself
+        double x = n_rat * n_rat;
+        SASSERT(0 <= x && x < 1);
+        x *= static_cast<double>(n);
+        unsigned k = static_cast<unsigned>(std::floor(x));
+        SASSERT(0 <= k && k < n);
+        auto it_k = m_gomory_cut_candidates_sorted_list.begin() + k;
+        if (can_be_used_for_cut(*it_k))
+            return *it_k;
         // find j in the neighbourdood of k
-        
-        unsigned j_low = k, j_high = k;
-        while (true) {
-            if (j_low > 0) {
-                j_low --;
-                if (can_be_used_for_cut(j_low)) {
-                    return j_low;
-                }
+        for (auto j_low = it_k; j_low-- != m_gomory_cut_candidates_sorted_list.begin();) {
+            if (can_be_used_for_cut(*j_low)) {
+                return *j_low;
             }
-            if (j_high < n - 1) {
-                j_high ++;
-                if (can_be_used_for_cut(j_high))
-                    return j_high;
-            }
-            if (j_low == 0 && j_high == n - 1)
-                return -1;
         }
+
+        for (auto j_high = it_k; j_high++ < m_gomory_cut_candidates_sorted_list.end() - 1;) {
+            if (can_be_used_for_cut(*j_high))
+                return *j_high;
+        }
+
         return -1;
     }
 

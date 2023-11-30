@@ -431,6 +431,8 @@ int gomory::find_beneficial_basic_var() {
     unsigned min_row_size = UINT_MAX;
     std::function<bool(lpvar)> can_be_used_for_cut= [&](lpvar j) {
         TRACE("gomory_cut", tout << "try j" << j << "\n");
+        if (j >= lia.column_count())
+            return false;
         if (!lia.is_base(j))
             return false;
 

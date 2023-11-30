@@ -67,7 +67,7 @@ class int_solver {
     explanation         *m_ex;             // the conflict explanation
     hnf_cutter          m_hnf_cutter;
     unsigned            m_hnf_cut_period;
-    std::list<lpvar>    m_gomory_cut_candidates_sorted_list;
+    unsigned_vector     m_gomory_cut_candidates_sorted_list;
     unsigned            m_gomory_cut_candidates_sort_count = 20; // to init the sorting
     unsigned            m_gomory_cut_candidates_sort_threshold = 20;
     vector<equality>    m_equalities;
