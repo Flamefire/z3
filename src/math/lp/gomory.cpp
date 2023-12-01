@@ -429,21 +429,6 @@ int gomory::find_beneficial_basic_var() {
     unsigned n = 0;
     int result = -1;
     unsigned min_row_size = UINT_MAX;
-    std::function<bool(lpvar)> can_be_used_for_cut= [&](lpvar j) {
-        TRACE("gomory_cut", tout << "try j" << j << "\n");
-        if (j >= lia.column_count())
-            return false;
-        if (!lia.is_base(j))
-            return false;
-
-        if (!lia.column_is_int_inf(j))
-            return false;
-
-        const row_strip<mpq>& row = lra.get_row(lia.row_of_basic_column(j));
-        if (!is_gomory_cut_target(row)) 
-            return false;
-        return true;
-    };
 
     std::function<bool(lpvar, lpvar)> compare = [&](lpvar j, lpvar k) {
         bool j_boxed = lia.is_boxed(j);
@@ -468,7 +453,7 @@ int gomory::find_beneficial_basic_var() {
         return j < k;
     };
 #if 1
-    result = lia.select_var_for_gomory_cut(can_be_used_for_cut, compare);
+    result = lia.select_var_for_gomory_cut(compare);
 
     if (result == -1)
         return result;

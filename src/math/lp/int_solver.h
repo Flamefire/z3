@@ -67,9 +67,11 @@ class int_solver {
     explanation         *m_ex;             // the conflict explanation
     hnf_cutter          m_hnf_cutter;
     unsigned            m_hnf_cut_period;
-    unsigned_vector     m_gomory_cut_candidates_sorted_list;
+    std::list<unsigned> m_gomory_cut_candidates_sorted_list;
     unsigned            m_gomory_cut_candidates_sort_count = 20; // to init the sorting
     unsigned            m_gomory_cut_candidates_sort_threshold = 20;
+    unsigned_vector     m_cut_vars;        // variables that should not be selected for cuts
+  
     vector<equality>    m_equalities;
 public:
     int_solver(lar_solver& lp);
@@ -92,7 +94,7 @@ public:
     vector<equality> const& equalities() const { return m_equalities; }
 
 private:
-    lpvar pick_gomory_cut_var(std::function<bool(lpvar)>);
+    lpvar pick_gomory_cut_var();
     void sort_gomory_cut_candidates(std::function<bool(lpvar, lpvar)> compare);
     bool get_freedom_interval_for_column(unsigned j, bool & inf_l, impq & l, bool & inf_u, impq & u, mpq & m);
     bool is_boxed(unsigned j) const;
@@ -134,7 +136,7 @@ public:
     bool all_columns_are_bounded() const;
     lia_move hnf_cut();
 
-    int select_int_infeasible_var(bool check_bounded);
-    lpvar select_var_for_gomory_cut(std::function<bool(lpvar)> can_be_used_for_cut, std::function<bool(lpvar, lpvar)>);
+    int select_int_infeasible_var();
+    lpvar select_var_for_gomory_cut(std::function<bool(lpvar, lpvar)> compare);
 };
 }

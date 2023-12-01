@@ -180,6 +180,7 @@ namespace lp {
         m_ex = e;
         m_ex->clear();
         m_upper = false;
+        m_cut_vars.reset();
         
         lia_move r = lia_move::undef;
 
@@ -198,11 +199,14 @@ namespace lp {
         if (r == lia_move::undef && should_hnf_cut()) r = hnf_cut();
 
         std::function<lia_move(void)> gomory_fn = [&]() { return gomory(*this)(); };
+        m_cut_vars.reset();
 #if 0
         if (r == lia_move::undef && should_gomory_cut()) r = gomory(*this)();
 #else
         if (r == lia_move::undef && should_gomory_cut()) r = local_cut(2, gomory_fn);
+        
 #endif
+        m_cut_vars.reset();
         if (r == lia_move::undef) r = int_branch(*this)();
         if (settings().get_cancel_flag()) r = lia_move::undef;        
         return r;
@@ -630,45 +634,97 @@ namespace lp {
         return true;
     }
 
-    lpvar int_solver::select_var_for_gomory_cut(std::function<bool(lpvar)> can_be_used_for_cut, std::function<bool(lpvar, lpvar)> compare) {
+lpvar int_solver::select_var_for_gomory_cut(std::function<bool(lpvar, lpvar)> compare) {
         SASSERT(m_gomory_cut_candidates_sort_count >= 0 && m_gomory_cut_candidates_sort_count <= m_gomory_cut_candidates_sort_threshold);
-        if (m_gomory_cut_candidates_sort_count == m_gomory_cut_candidates_sort_threshold || m_gomory_cut_candidates_sorted_list.size() < lra.column_count()) {
+        if (m_gomory_cut_candidates_sort_count == m_gomory_cut_candidates_sort_threshold) {
             m_gomory_cut_candidates_sort_count = 0;
             sort_gomory_cut_candidates(compare);
         } else {
             m_gomory_cut_candidates_sort_count++;
         }
 
-        return pick_gomory_cut_var(can_be_used_for_cut);
+        return pick_gomory_cut_var();
     }
 
-    lpvar int_solver::pick_gomory_cut_var(std::function<bool(lpvar)> can_be_used_for_cut) {
-        unsigned n = lra.column_count();
-        unsigned n_rand = random() % n;
-        double n_rat = static_cast<double>(n_rand) / static_cast<double>(n);
-        SASSERT(0 <= n_rat && n_rat < 1);
-        // diminish n_rat by setting it to square of itself
-        double x = n_rat * n_rat;
-        SASSERT(0 <= x && x < 1);
-        x *= static_cast<double>(n);
-        unsigned k = static_cast<unsigned>(std::floor(x));
-        SASSERT(0 <= k && k < n);
-        auto it_k = m_gomory_cut_candidates_sorted_list.begin() + k;
-        if (can_be_used_for_cut(*it_k))
-            return *it_k;
-        // find j in the neighbourdood of k
-        for (auto j_low = it_k; j_low-- != m_gomory_cut_candidates_sorted_list.begin();) {
-            if (can_be_used_for_cut(*j_low)) {
-                return *j_low;
+    lpvar int_solver::pick_gomory_cut_var() {
+        int r_small_box = -1;
+        int r_small_value = -1;
+        int r_any_value = -1;
+        unsigned n_small_box = 1;
+        unsigned n_small_value = 1;
+        unsigned n_any_value = 1;
+        mpq range;
+        mpq new_range;
+        mpq small_value(1024);
+        lar_core_solver & lcs = lra.m_mpq_lar_core_solver;
+        unsigned prev_usage = 0;
+        unsigned number_of_tries =  random() % lra.row_count();
+        if (number_of_tries == 0) number_of_tries = 1;
+        auto check_bounded_fn = [&](unsigned j) {
+            auto const& row = lra.get_row(row_of_basic_column(j));
+            for (const auto & p : row) {
+                unsigned j = p.var();
+                if (!is_base(j) && (!at_bound(j) || !is_zero(get_value(j).y)))
+                    return false;
             }
+            return true;
+        };
+
+        auto add_column = [&](bool improved, int& result, unsigned& n, unsigned j) {
+            if (result == -1)
+                result = j;
+            else if (improved && ((random() % (++n)) == 0))
+                result = j;           
+
+            number_of_tries--;     
+        };
+        // todo: preserve the iterator and move the used elements to the end of the list
+        for (auto it = m_gomory_cut_candidates_sorted_list.begin(); it != m_gomory_cut_candidates_sorted_list.end() && number_of_tries > 0; ++it) {
+            lpvar j = *it;
+            if (j >= lra.column_count())
+                continue;
+            if (!is_base(j))
+                continue;
+            if (!column_is_int_inf(j))
+                continue;
+            if (!check_bounded_fn(j))
+                continue;
+            
+            SASSERT(!is_fixed(j));
+
+            unsigned usage = lra.usage_in_terms(j);
+            if (is_boxed(j) && (new_range = lcs.m_r_upper_bounds()[j].x - lcs.m_r_lower_bounds()[j].x - rational(2*usage)) <= small_value) {
+
+                bool improved = new_range <= range || r_small_box == -1;
+                if (improved)
+                    range = new_range;
+                add_column(improved, r_small_box, n_small_box, j);
+                continue;
+            }
+            impq const& value = get_value(j);
+            if (abs(value.x) < small_value ||
+                (has_upper(j) && small_value > upper_bound(j).x - value.x) ||
+                (has_lower(j) && small_value > value.x - lower_bound(j).x)) {
+                TRACE("gomory_cut", tout << "small j" << j << "\n");
+                add_column(true, r_small_value, n_small_value, j);
+                continue;
+            }
+            TRACE("gomory_cut", tout << "any j" << j << "\n");
+            add_column(usage >= prev_usage, r_any_value, n_any_value, j);
+            if (usage > prev_usage) 
+                prev_usage = usage;
         }
 
-        for (auto j_high = it_k; j_high++ < m_gomory_cut_candidates_sorted_list.end() - 1;) {
-            if (can_be_used_for_cut(*j_high))
-                return *j_high;
-        }
-
-        return -1;
+        if (r_small_box != -1 && (random() % 3 != 0))
+            return r_small_box;
+        if (r_small_value != -1 && (random() % 3) != 0)
+            return r_small_value;
+        if (r_any_value != -1)
+            return r_any_value;
+        if (r_small_box != -1)
+            return r_small_box;
+        return r_small_value;
+    
     }
 
     void int_solver::sort_gomory_cut_candidates(std::function<bool(lpvar, lpvar)> compare) {
@@ -683,7 +739,7 @@ namespace lp {
 
     
     
-    int int_solver::select_int_infeasible_var(bool check_bounded) {
+    int int_solver::select_int_infeasible_var() {
         int r_small_box = -1;
         int r_small_value = -1;
         int r_any_value = -1;
@@ -696,18 +752,6 @@ namespace lp {
         lar_core_solver & lcs = lra.m_mpq_lar_core_solver;
         unsigned prev_usage = 0;
 
-        auto check_bounded_fn = [&](unsigned j_to_check) {
-            if (!check_bounded)
-                return true;
-            auto const& row = lra.get_row(row_of_basic_column(j_to_check));
-            for (const auto & p : row) {
-                unsigned j = p.var();
-                if (!is_base(j) && (!at_bound(j) || !is_zero(get_value(j).y)))
-                    return false;
-            }
-            return true;
-        };
-
         auto add_column = [&](bool improved, int& result, unsigned& n, unsigned j) {
             if (result == -1)
                 result = j;
@@ -716,12 +760,14 @@ namespace lp {
         };
         
         for (unsigned j : lra.r_basis()) {
+			
             if (!column_is_int_inf(j))
-                continue;
-            if (!check_bounded_fn(j))
                 continue;
          
             SASSERT(!is_fixed(j));
+			
+         	if (m_cut_vars.contains(j))
+                continue;
 
             unsigned usage = lra.usage_in_terms(j);
             if (is_boxed(j) &&
@@ -913,6 +959,7 @@ namespace lp {
             if (settings().get_cancel_flag())
                 return lia_move::undef;
         }
+        m_cut_vars.reset();
 
         auto is_small_cut = [&](ex const& cut) {
             return all_of(cut.m_term, [&](auto ci) { return ci.coeff().is_small(); });
