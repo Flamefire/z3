@@ -647,9 +647,10 @@ lpvar int_solver::select_var_for_gomory_cut(std::function<bool(lpvar, lpvar)> co
     }
 
     lpvar int_solver::pick_gomory_cut_var() {
-        int r_small_box = -1;
-        int r_small_value = -1;
-        int r_any_value = -1;
+        auto nill = m_gomory_cut_candidates_sorted_list.end();
+        auto r_small_box = nill;
+        auto r_small_value =  nill;
+        auto r_any_value =  nill;
         unsigned n_small_box = 1;
         unsigned n_small_value = 1;
         unsigned n_any_value = 1;
@@ -669,17 +670,21 @@ lpvar int_solver::select_var_for_gomory_cut(std::function<bool(lpvar, lpvar)> co
             }
             return true;
         };
-        std::list<lpvar>::iterator it_best;
 
-        auto add_column = [&](bool improved, int& result, unsigned& n, std::list<lpvar>::iterator& it) {
-            if (result == -1 || (improved && ((random() % (++n)) == 0))) {
-                result = *it;           
+        auto move_to_end = [&](std::list<lpvar>::iterator& it) {
+            lpvar j = *it;
+            m_gomory_cut_candidates_sorted_list.splice(m_gomory_cut_candidates_sorted_list.end(), m_gomory_cut_candidates_sorted_list, it);
+            return j;
+        };
+
+        auto add_column = [&](bool improved, std::list<lpvar>::iterator& result, unsigned& n, std::list<lpvar>::iterator& it) {
+            if (result == nill || (improved && ((random() % (++n)) == 0))) {
+                result = it;           
                 number_of_tries--;
-                it_best = it;
             }
         };
         // todo: preserve the iterator and move the used elements to the end of the list
-        for (auto it = m_gomory_cut_candidates_sorted_list.begin(); it != m_gomory_cut_candidates_sorted_list.end() && number_of_tries > 0; ++it) {
+        for (auto it = m_gomory_cut_candidates_sorted_list.begin(); it != nill && number_of_tries > 0; ++it) {
             lpvar j = *it;
             if (j >= lra.column_count())
                 continue;
@@ -695,7 +700,7 @@ lpvar int_solver::select_var_for_gomory_cut(std::function<bool(lpvar, lpvar)> co
             unsigned usage = lra.usage_in_terms(j);
             if (is_boxed(j) && (new_range = lcs.m_r_upper_bounds()[j].x - lcs.m_r_lower_bounds()[j].x - rational(2*usage)) <= small_value) {
 
-                bool improved = new_range <= range || r_small_box == -1;
+                bool improved = new_range <= range || r_small_box == nill;
                 if (improved)
                     range = new_range;
                 add_column(improved, r_small_box, n_small_box, it);
@@ -715,15 +720,18 @@ lpvar int_solver::select_var_for_gomory_cut(std::function<bool(lpvar, lpvar)> co
                 prev_usage = usage;
         }
 
-        if (r_small_box != -1 && (random() % 3 != 0))
-            return r_small_box;
-        if (r_small_value != -1 && (random() % 3) != 0)
-            return r_small_value;
-        if (r_any_value != -1)
-            return r_any_value;
-        if (r_small_box != -1)
-            return r_small_box;
-        return r_small_value;
+        if (r_small_box != nill && (random() % 3 != 0))
+            return move_to_end(r_small_box);
+        if (r_small_value != nill && (random() % 3) != 0)
+            return move_to_end(r_small_value);
+        if (r_any_value != nill)
+            return move_to_end(r_any_value);
+        if (r_small_box != nill)
+            return move_to_end(r_small_box);
+        if (r_small_value != nill)
+            return move_to_end(r_small_value);
+
+        return -1;
     
     }
 
