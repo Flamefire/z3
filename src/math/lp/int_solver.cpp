@@ -669,14 +669,14 @@ lpvar int_solver::select_var_for_gomory_cut(std::function<bool(lpvar, lpvar)> co
             }
             return true;
         };
+        std::list<lpvar>::iterator it_best;
 
-        auto add_column = [&](bool improved, int& result, unsigned& n, unsigned j) {
-            if (result == -1)
-                result = j;
-            else if (improved && ((random() % (++n)) == 0))
-                result = j;           
-
-            number_of_tries--;     
+        auto add_column = [&](bool improved, int& result, unsigned& n, std::list<lpvar>::iterator& it) {
+            if (result == -1 || (improved && ((random() % (++n)) == 0))) {
+                result = *it;           
+                number_of_tries--;
+                it_best = it;
+            }
         };
         // todo: preserve the iterator and move the used elements to the end of the list
         for (auto it = m_gomory_cut_candidates_sorted_list.begin(); it != m_gomory_cut_candidates_sorted_list.end() && number_of_tries > 0; ++it) {
@@ -698,7 +698,7 @@ lpvar int_solver::select_var_for_gomory_cut(std::function<bool(lpvar, lpvar)> co
                 bool improved = new_range <= range || r_small_box == -1;
                 if (improved)
                     range = new_range;
-                add_column(improved, r_small_box, n_small_box, j);
+                add_column(improved, r_small_box, n_small_box, it);
                 continue;
             }
             impq const& value = get_value(j);
@@ -706,11 +706,11 @@ lpvar int_solver::select_var_for_gomory_cut(std::function<bool(lpvar, lpvar)> co
                 (has_upper(j) && small_value > upper_bound(j).x - value.x) ||
                 (has_lower(j) && small_value > value.x - lower_bound(j).x)) {
                 TRACE("gomory_cut", tout << "small j" << j << "\n");
-                add_column(true, r_small_value, n_small_value, j);
+                add_column(true, r_small_value, n_small_value, it);
                 continue;
             }
             TRACE("gomory_cut", tout << "any j" << j << "\n");
-            add_column(usage >= prev_usage, r_any_value, n_any_value, j);
+            add_column(usage >= prev_usage, r_any_value, n_any_value, it);
             if (usage > prev_usage) 
                 prev_usage = usage;
         }
